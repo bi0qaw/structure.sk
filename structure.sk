@@ -1,0 +1,465 @@
+# version: 1.0.0
+# requires:
+#   skript-mirror: https://github.com/btk5h/skript-mirror/releases
+#   StructureBlockLib: https://github.com/Shynixn/StructureBlockLib/releases
+#   spigot: versions 1.9.0 - 1.12.0, note that it does NOT work on versions > 1.12.0
+# effects:
+#   load structure of %block%
+#   load structure %string% from [author] %string% at %location% rotated by %number%, mirrored %string% and ignoring entities %boolean%
+#   save structure of %block%
+#   save structure %string% from [author] %string% between %location% and %location%
+#   set structure corners of %block% to %location% and %location%
+# expressions:
+#   structure author of %block% -> %string%
+#   structure meta data of %block% -> %string%
+#   structure integrity of %block% -> %number%
+#   structure mirror type of %block% -> %string%
+#   structure rotation of %block% -> %number%
+#   structure name of %block% -> %string%
+#   structure seed of %block% -> %number%
+#   structure [(1¦x|2¦y|3¦z)][-]size of %block% -> %number% or %vector% if x/y/z is omitted
+#   structure relative (1¦location|2¦vector) of %block% -> %location% or %vector%
+#   structure (1¦min|2¦max)[imum] location of %block% -> %location%
+#   structure mode of %block% -> %string%
+#   structure bounding box of %block% is visible -> %boolean%
+#   structure of %block% ignores entities -> %boolean%
+#   structure of %block% shows invisible blocks -> %boolean%
+# comment about rotations:
+#   the rotation is always either 0, 90, 180 or 270
+#   rotations that are smaller than 0 or bigger than 360 are increased / decreased by mutliples of 360 until they are between 0-360
+#   rotations that do not match one of the given options are rounded to the closest multiple of 90
+#   if the final value is 360 it will be set to 0
+#   increasing the rotation rotates the structure clockwise
+#   decreasing the rotation rotates the structure anti-clockwise
+# comment about mirroring:
+#   possible values are: "NONE", "LEFT_RIGHT" and "FRONT_BACK"
+
+on load:
+    import "com.github.shynixn.structureblocklib.api.StructureBlockApi"
+
+on unload:
+    clear {StructureBlockApi}
+
+function location_lower(loc: location) :: location:
+    set {_x} to x-coordinate of {_loc}
+    set {_y} to y-coordinate of {_loc}
+    set {_z} to z-coordinate of {_loc}
+    set {_world} to world of {_loc}
+    set {_x} to floor({_x})
+    set {_y} to floor({_y})
+    set {_z} to floor({_z})
+    set {_loc} to location({_x}, {_y}, {_z}, {_world})
+    return {_loc}
+
+function location_upper(loc: location) :: location:
+    set {_x} to x-coordinate of {_loc}
+    set {_y} to y-coordinate of {_loc}
+    set {_z} to z-coordinate of {_loc}
+    set {_world} to world of {_loc}
+    set {_x} to ceil({_x})
+    set {_y} to ceil({_y})
+    set {_z} to ceil({_z})
+    set {_loc} to location({_x}, {_y}, {_z}, {_world})
+    return {_loc}
+
+function location_min(l1: location, l2: location) :: location:
+    set {_x} to min(x-coordinate of {_l1}, x-coordinate of {_l2})
+    set {_y} to min(y-coordinate of {_l1}, y-coordinate of {_l2})
+    set {_z} to min(z-coordinate of {_l1}, z-coordinate of {_l2})
+    set {_world} to world of {_l1}
+    set {_loc} to location({_x}, {_y}, {_z}, {_world})
+    return {_loc}
+
+function location_max(l1: location, l2: location) :: location:
+    set {_x} to max(x-coordinate of {_l1}, x-coordinate of {_l2})
+    set {_y} to max(y-coordinate of {_l1}, y-coordinate of {_l2})
+    set {_z} to max(z-coordinate of {_l1}, z-coordinate of {_l2})
+    set {_world} to world of {_l1}
+    set {_loc} to location({_x}, {_y}, {_z}, {_world})
+    return {_loc}
+
+function structure_rotation_number_to_string(rot: number) :: string:
+    set {_rot} to mod({_rot}, 360)          # clamp value between -360 and 360
+    if {_rot} < 0:
+        set {_rot} to {_rot} + 360          # make negative values positive
+    set {_rot} to round({_rot} / 90) * 90   # round value to the closest multiple of 90
+    if {_rot} is 0 or 360:
+        return "NONE"
+    else:
+        return "ROTATION_%{_rot}%"
+
+function structure_minmax(b: block) :: locations:
+    set {_loc} to location_lower({_b})
+    set {_structure} to {StructureBlockApi}.from({_b})
+    set {_relative} to {_structure}.getStructureLocation().toVector()
+    set {_x} to {_structure}.getSizeX()
+    set {_y} to {_structure}.getSizeY()
+    set {_z} to {_structure}.getSizeZ()
+    set {_size} to vector {_x}, {_y}, {_z}
+    set {_l1} to {_loc} ~ {_relative}
+    set {_l2} to {_l1} ~ {_size}
+    set {_min} to location_min({_l1}, {_l2})
+    set {_max} to location_max({_l1}, {_l2})
+    return {_min} and {_max}
+
+function structure_min(b: block) :: location:
+    set {_locs::*} to structure_minmax({_b})
+    return {_locs::1}
+
+function structure_max(b: block) :: location:
+    set {_locs::*} to structure_minmax({_b})
+    return {_locs::2}
+
+function structure_set_minmax(b: block, min: location, max: location):
+    set {_min} to location_lower({_min})
+    set {_max} to location_upper({_max})
+    set {_loc} to location_lower({_b})
+    set {_structure} to {StructureBlockApi}.from({_b})
+    set {_offset} to vector 0, 0, 0 -- vector of {_loc}
+    set {_size} to vector of {_max} -- vector of {_min}
+    set {_relative} to {_min} ~ {_offset}
+    {_structure}.setStructureLocation({_relative});
+    {_structure}.setSizeX(x of {_size});
+    {_structure}.setSizeY(y of {_size});
+    {_structure}.setSizeZ(z of {_size});
+    {_structure}.update();
+
+effect load structure %string% from [author] %string% at %location% rotated by %number%, mirrored %string% and ignoring entities %boolean%:
+    import "com.github.shynixn.structureblocklib.api.entity.StructureMirror" as {_StructureMirror}
+    import "com.github.shynixn.structureblocklib.api.entity.StructureRotation" as {_StructureRotation}
+    set {_name} to expression-1
+    set {_author} to expression-2
+    set {_loc} to expression-3
+    set {_rot} to expression-4
+    set {_mir} to expression-5
+    set {_entities} to expression-6
+    set {_rotation} to structure_rotation_number_to_string({_rot})
+    set {_rotation} to {_StructureRotation}.valueOf({_rotation})
+    set {_mirror} to {_StructureMirror}.valueOf({_mir})
+    {StructureBlockApi}.load({_author}, {_name}, {_loc}, {_entities}, {_rotation} and {_mirror});
+
+effect save structure %string% from [author] %string% between %location% and %location%:
+    set {_name} to expression-1
+    set {_author} to expression-2
+    set {_l1} to expression-3
+    set {_l2} to expression-4
+    set {_min} to location_min({_l1}, {_l2})
+    set {_max} to location_max({_l1}, {_l2})
+    set {_min} to location_lower({_min})
+    set {_max} to location_upper({_max})
+    {StructureBlockApi}.save({_author}, {_name}, {_min} and {_max});
+
+effect set structure corners of %block% to %location% and %location%:
+    if "%expression-1%" is "structure_block":
+        set {_l1} to expression-2
+        set {_l2} to expression-3
+        set {_min} to location_min({_l1}, {_l2})
+        set {_max} to location_max({_l1}, {_l2})
+        broadcast "l1: %{_l1}%"
+        broadcast "l2: %{_l2}%"
+        broadcast "min: %{_min}%"
+        broadcast "max: %{_max}%"
+        structure_set_minmax(expression-1, {_min}, {_max})
+
+effect load structure of %block%:
+    if "%expression-1%" is "structure_block":
+        {StructureBlockApi}.from(expression-1).load();
+
+effect save structure of %block%:
+    if "%expression-1%" is "structure_block":
+        {StructureBlockApi}.from(expression-1).save();
+
+get expression structure author of %block%:
+    if "%expression-1%" is "structure_block":
+        continue {StructureBlockApi}.from(expression-1).getAuthor()
+    continue
+
+change expression structure author of %block%:
+    if "%expression-1%" is "structure_block":
+        if change mode is to set:
+            set {_structure} to {StructureBlockApi}.from(expression-1)
+            {_structure}.setAuthor("%change value%");
+            {_structure}.update(true and true);
+    continue
+
+get expression structure [(1¦x|2¦y|3¦z)][-]size of %block%:
+    if "%expression-1%" is "structure_block":
+        if parse mark is 0:
+            set {_x} to {StructureBlockApi}.from(expression-1).getSizeX()
+            set {_y} to {StructureBlockApi}.from(expression-1).getSizeY()
+            set {_z} to {StructureBlockApi}.from(expression-1).getSizeZ()
+            continue vector {_x}, {_y}, {_z}
+        else if parse mark is 1:
+            continue {StructureBlockApi}.from(expression-1).getSizeX()
+        else if parse mark is 2:
+            continue {StructureBlockApi}.from(expression-1).getSizeY()
+        else if parse mark is 3:
+            continue {StructureBlockApi}.from(expression-1).getSizeZ()
+    continue
+
+change expression structure [(1¦x|2¦y|3¦z)][-]size of %block%:
+    if "%expression-1%" is "structure_block":
+        set {_structure} to {StructureBlockApi}.from(expression-1)
+        if parse mark is 0:
+            set {_x} to x-coordinate of change value
+            set {_y} to y-coordinate of change value
+            set {_z} to z-coordinate of change value
+        if change mode is to set:
+            if parse mark is 0:
+                {_structure}.setSizeX({_x})
+                {_structure}.setSizeY({_y})
+                {_structure}.setSizeZ({_z})
+            else if parse mark is 1:
+                {_structure}.setSizeX(change value);
+            else if parse mark is 2:
+                {_structure}.setSizeY(change value);
+            else if parse mark is 3:
+                {_structure}.setSizeZ(change value);
+        else if change mode is to add:
+            if parse mark is 0:
+                set {_x} to {_structure}.getSizeX() + {_x}
+                set {_y} to {_structure}.getSizeY() + {_y}
+                set {_z} to {_structure}.getSizeZ() + {_z}
+                {_structure}.setSizeX({_x});
+                {_structure}.setSizeY({_y});
+                {_structure}.setSizeZ({_z});
+            else if parse mark is 1:
+                set {_x} to {_structure}.getSizeX() + change value
+                {_structure}.setSizeX({_x});
+            else if parse mark is 2:
+                set {_y} to {_structure}.getSizeY() + change value
+                {_structure}.setSizeY({_y});
+            else if parse mark is 3:
+                set {_z} to {_structure}.getSizeZ() + change value
+                {_structure}.setSizeZ({_z});
+        else if change mode is to remove:
+            if parse mark is 0:
+                set {_x} to {_structure}.getSizeX() - {_x}
+                set {_y} to {_structure}.getSizeY() - {_y}
+                set {_z} to {_structure}.getSizeZ() - {_z}
+                {_structure}.setSizeX({_x});
+                {_structure}.setSizeY({_y});
+                {_structure}.setSizeZ({_z});
+            else if parse mark is 1:
+                set {_x} to {_structure}.getSizeX() - change value
+                {_structure}.setSizeX({_x});
+            else if parse mark is 2:
+                set {_y} to {_structure}.getSizeY() - change value
+                {_structure}.setSizeY({_y});
+            else if parse mark is 3:
+                set {_z} to {_structure}.getSizeZ() - change value
+                {_structure}.setSizeZ({_z});
+        {_structure}.update(true and true);
+    continue
+
+get expression structure relative (1¦location|2¦vector) of %block%:
+    if "%expression-1%" is "structure_block":
+        set {_vec} to {StructureBlockApi}.from(expression-1).getStructureLocation().toVector()
+        if parse mark is 1:
+            set {_loc} to location_lower(expression-1)
+            add x-coordinate of {_vec} to x-coordinate of {_loc}
+            add y-coordinate of {_vec} to y-coordinate of {_loc}
+            add z-coordinate of {_vec} to z-coordinate of {_loc}
+            continue {_loc}
+        else if parse mark is 2:
+            continue {_vec}
+    continue
+
+change expression structure relative (1¦location|2¦vector) of %block%:
+    if "%expression-1%" is "structure_block":
+        if change mode is to set:
+            set {_loc} to location_lower(expression-1)
+            set {_structure} to {StructureBlockApi}.from(expression-1)
+            {_structure}.setStructureLocation({_new});
+            if parse mark is 1:
+                set {_vec} to vector 0, 0, 0 -- vector of {_loc}
+                set {_new} to change value ~ {_vec}
+                {_structure}.setStructureLocation({_new});
+                {_structure}.update(true and true);
+            else if parse mark is 2:
+                set {_x} to x-coordinate of change value
+                set {_y} to y-coordinate of change value
+                set {_z} to z-coordinate of change value
+                set {_world} to world of {_loc}
+                set {_new} to location({_x}, {_y}, {_z}, {_world})
+                {_structure}.setStructureLocation({_new});
+                {_structure}.update(true and true);
+    continue
+
+get expression structure (1¦min|2¦max)[imum] location of %block%:
+    if "%expression-1%" is "structure_block":
+        if parse mark is 1:
+            continue structure_min(expression-1)
+        else if parse mark is 2:
+            continue structure_max(expression-1)
+
+change expression structure (1¦min|2¦max)[imum] location of %block%:
+    if "%expression-1%" is "structure_block":
+        set {_minmax::*} to structure_minmax(expression-1)
+        set {_min} to {_minmax::1}
+        set {_max} to {_minmax::2}
+        if change mode is to set:
+            if parse mark is 1:
+                set {_min} to change value
+            else if parse mark is 2:
+                set {_max} to change value
+            structure_set_minmax(expression-1, {_min}, {_max})
+    continue
+
+get expression structure of %block% ignores entities:
+    if "%expression-1%" is "structure_block":
+        continue {StructureBlockApi}.from(expression-1).isIgnoreEntities()
+    continue
+
+change expression structure of %block% ignores entities:
+    if "%expression-1%" is "structure_block":
+        if change mode is to set:
+            set {_structure} to {StructureBlockApi}.from(expression-1)
+            {_structure}.setIgnoreEntities(change value);
+            {_structure}.update(true and true);
+    continue
+
+get expression structure integrity of %block%:
+    if "%expression-1%" is "structure_block":
+        continue {StructureBlockApi}.from(expression-1).getIntegrity()
+    continue
+
+change expression structure integrity of %block%:
+    if "%expression-1%" is "structure_block":
+        if change mode is to set:
+            set {_structure} to {StructureBlockApi}.from(expression-1)
+            {_structure}.setIntegrity(change value);
+            {_structure}.update(true and true);
+    continue
+
+get expression structure mirror type of %block%:
+    if "%expression-1%" is "structure_block":
+        continue {StructureBlockApi}.from(expression-1).getMirrorType().toString()
+    continue
+
+change expression structure mirror type of %block%:
+    if "%expression-1%" is "structure_block":
+        if change mode is to set:
+            if change value is "NONE", "LEFT_RIGHT" or "FRONT_BACK":
+                import "com.github.shynixn.structureblocklib.api.entity.StructureMirror" as {_mirror}
+                set {_structuremirror} to {_mirror}.valueOf(change value)
+                set {_structure} to {StructureBlockApi}.from(expression-1)
+                {_structure}.setMirrorType({_structuremirror});
+                {_structure}.update(true and true);
+    continue
+
+get expression structure rotation of %block%:
+    if "%expression-1%" is "structure_block":
+        set {_rotation} to {StructureBlockApi}.from(expression-1).getRotation().toString()
+        if {_rotation} is "NONE":
+            continue 0
+        else:
+            set {_split::*} to {_rotation} split at "_"
+            continue {_split::2} parsed as number
+    continue
+
+change expression structure rotation of %block%:
+    if "%expression-1%" is "structure_block":
+        import "com.github.shynixn.structureblocklib.api.entity.StructureRotation" as {_rotation}
+
+        set {_current} to {StructureBlockApi}.from(expression-1).getRotation().toString()
+        if {_current} is "NONE":
+            set {_current} to 0
+        else:
+            set {_split::*} to {_current} split at "_"
+            set {_current} to {_split::2} parsed as number
+        set {_new} to {_current}
+
+        set {_structure} to {StructureBlockApi}.from(expression-1)
+        if change mode is to set:
+            set {_new} to change value
+        else if change mode is to add:
+            set {_new} to {_new} + change value
+        else if change mode is to remove:
+            set {_new} to {_new} - change value
+        set {_new} to structure_rotation_number_to_string({_new})
+        {_structure}.setRotation({_rotation}.valueOf({_new}));
+        {_structure}.update(true and true);
+    continue
+
+get expression structure seed of %block%:
+    if "%expression-1%" is "structure_block":
+        continue {StructureBlockApi}.from(expression-1).getSeed()
+    continue
+
+change expression structure seed of %block%:
+    if "%expression-1%" is "structure_block":
+        if change mode is to set:
+            set {_structure} to {StructureBlockApi}.from(expression-1)
+            {_structure}.setSeed(change value);
+            {_structure}.update(true and true);
+    continue
+
+get expression structure meta data of %block%:
+    if "%expression-1%" is "structure_block":
+        continue {StructureBlockApi}.from(expression-1).getBlockNameMetaData()
+    continue
+
+change expression structure meta data of %block%:
+    if "%expression-1%" is "structure_block":
+        if change mode is to set:
+            set {_structure} to {StructureBlockApi}.from(expression-1)
+            {_structure}.setBlockNameMetaData(change value);
+            {_structure}.update(true and true);
+    continue
+
+get expression structure bounding box of %block% is visible:
+    if "%expression-1%" is "structure_block":
+        continue {StructureBlockApi}.from(expression-1).isBoundingBoxVisible()
+    continue
+
+change expression structure bounding box of %block% is visible:
+    if "%expression-1%" is "structure_block":
+        if change mode is to set:
+            set {_structure} to {StructureBlockApi}.from(expression-1)
+            {_structure}.setBoundingBoxVisible(change value);
+            {_structure}.update(true and true);
+    continue
+
+get expression structure of %block% is showing invisible blocks:
+    if "%expression-1%" is "structure_block":
+        continue {StructureBlockApi}.from(expression-1).isShowingInvisibleBlocks()
+    continue
+
+change expression structure of %block% is showing invisible blocks:
+    if "%expression-1%" is "structure_block":
+        if change mode is to set:
+            set {_structure} to {StructureBlockApi}.from(expression-1)
+            {_structure}.showInvisibleBlocks(change value);
+            {_structure}.update(true and true);
+    continue
+
+get expression structure name of %block%:
+    if "%expression-1%" is "structure_block":
+        continue {StructureBlockApi}.from(expression-1).getSaveName()
+    continue
+
+change expression structure name of %block%:
+    if "%expression-1%" is "structure_block":
+        if change mode is to set:
+            set {_structure} to {StructureBlockApi}.from(expression-1)
+            {_structure}.setSaveName(change value);
+            {_structure}.update(true and true);
+    continue
+
+
+get expression structure mode of %block%:
+    if "%expression-1%" is "structure_block":
+        continue {StructureBlockApi}.from(expression-1).getStructureMode().toString()
+    continue
+
+change expression structure mode of %block%:
+    if "%expression-1%" is "structure_block":
+        if change mode is to set:
+            if change value is "DATA", "SAVE", "LOAD" or "CORNER":
+                import "com.github.shynixn.structureblocklib.api.entity.StructureMode" as {_mode}
+                set {_structuremode} to {_mode}.valueOf(change value)
+                set {_structure} to {StructureBlockApi}.from(expression-1)
+                {_structure}.setStructureMode({_structuremode});
+                {_structure}.update(true and true);
+    continue
